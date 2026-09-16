@@ -62,6 +62,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: fork-${{ matrix.target }}
+          cache-on-failure: true
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -92,7 +93,7 @@ jobs:
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           arch=arm64
           if [[ "${{ matrix.target }}" == x86_64-* ]]; then arch=x86_64; fi
-          lipo -verify_arch "$arch" "$app/Contents/MacOS/$executable"
+          lipo "$app/Contents/MacOS/$executable" -verify_arch "$arch"
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.target }}
