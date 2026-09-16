@@ -129,6 +129,23 @@ jobs:
           - In-app update endpoints are disabled. Install future releases manually from this repository.
           NOTES
           printf '\nSource commit: `%s`\n' "$GITHUB_SHA" >> release-notes.md
+          python3 - <<'PYTHON'
+          from pathlib import Path
+
+          root = Path('installers')
+          assets = sorted(p for p in root.rglob('*') if p.suffix in {'.dmg', '.exe', '.deb', '.rpm'})
+          if len(assets) != 8:
+              raise SystemExit(f'Expected 8 installers, found {len(assets)}')
+          names = [p.name.replace(' ', '.') for p in assets]
+          if len(set(names)) != len(names):
+              raise SystemExit('Installer names collide after normalization')
+          for source, name in zip(assets, names):
+              destination = root / name
+              if source != destination:
+                  if destination.exists():
+                      raise SystemExit(f'Destination already exists: {destination}')
+                  source.rename(destination)
+          PYTHON
           mapfile -d '' assets < <(find installers -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.deb' -o -name '*.rpm' \) -print0)
           test "${#assets[@]}" -eq 8
           (cd installers && find . -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.deb' -o -name '*.rpm' \) -print0 | sort -z | xargs -0 sha256sum) > installers/SHA256SUMS.txt
