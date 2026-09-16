@@ -78,7 +78,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="target/${{ matrix.target }}/release/bundle/macos/Clash Verge.app"
+          shopt -s nullglob
+          dmgs=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          test "${#dmgs[@]}" -eq 1
+          mount_dir=$(mktemp -d "$RUNNER_TEMP/fork-dmg.XXXXXX")
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "${dmgs[0]}"
+          trap 'hdiutil detach "$mount_dir"' EXIT
+          apps=("$mount_dir"/*.app)
+          test "${#apps[@]}" -eq 1
+          app="${apps[0]}"
           codesign --verify --deep --strict --verbose=2 "$app"
           codesign --display --verbose=2 "$app" 2>&1 | grep 'Signature=adhoc'
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
