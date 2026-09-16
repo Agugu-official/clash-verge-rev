@@ -1,0 +1,87 @@
+name: Fork macOS Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  HUSKY: 0
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pnpm
+        run: npm install --global pnpm@11.3.0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-macos-aarch64
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare bundled resources
+        run: pnpm run prebuild aarch64-apple-darwin
+      - name: Build Apple Silicon installer
+        run: pnpm exec tauri build --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.fork.conf.json
+      - name: Verify application signature and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="target/aarch64-apple-darwin/release/bundle/macos/Clash Verge.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep 'Signature=adhoc'
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          lipo -verify_arch arm64 "$app/Contents/MacOS/$executable"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64-dmg
+          path: target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-aarch64-dmg
+          path: installers
+      - name: Publish fork prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version package.json)
+          tag="fork-v${version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat > release-notes.md <<'NOTES'
+          Personal fork build for macOS Apple Silicon (M-series).
+
+          - Preserves this fork's existing fix that stops writing 114.114.114.114 to system DNS.
+          - Uses ad-hoc signing; not notarized by Apple.
+          - In-app update endpoints are disabled. Install future releases manually from this repository.
+          NOTES
+          printf '\nSource commit: `%s`\n' "$GITHUB_SHA" >> release-notes.md
+          gh release create "$tag" installers/*.dmg \
+            --target "$GITHUB_SHA" \
+            --title "Clash Verge ${version} — macOS Apple Silicon" \
+            --notes-file release-notes.md \
+            --prerelease
